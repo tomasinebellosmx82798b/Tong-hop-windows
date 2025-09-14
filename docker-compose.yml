@@ -14,6 +14,6 @@ services:
       - 3389:3389/tcp
       - 3389:3389/udp
     volumes:
-      - ./windows:/storage
+      - ./windows-data:/data
     restart: always
     stop_grace_period: 2m
