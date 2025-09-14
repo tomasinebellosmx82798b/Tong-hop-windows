@@ -11,6 +11,7 @@ services:
       CPU_CORES: "8"
       USERNAME: "Hoang"
       PASSWORD: "Dztop1vn"
+      EDITION: "WIN10 PRO - SUPERLITE SE"
     devices:
       - /dev/kvm
       - /dev/net/tun
