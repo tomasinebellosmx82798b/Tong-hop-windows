@@ -4,6 +4,13 @@ services:
     container_name: windows
     environment:
       VERSION: "https://dn720003.ca.archive.org/0/items/ghost-spectre-windows-10/2009.SUPERLITE%2BCOMPACT.X64.U2.GHOSTSPECTRE.(N).ISO"
+      # Define sizes for additional disks
+      DISK_SIZE: "256G"
+      DISK2_SIZE: "32G"
+      RAM_SIZE: "14G"
+      CPU_CORES: "8"
+      USERNAME: "Hoang"
+      PASSWORD: "Dztop1vn"
     devices:
       - /dev/kvm
       - /dev/net/tun
@@ -14,6 +21,9 @@ services:
       - 3389:3389/tcp
       - 3389:3389/udp
     volumes:
+      # Main disk (default behavior)
       - ./windows-data:/data
+      # Map volumes for additional disks
+      - ./windows-disk2:/storage2
     restart: always
     stop_grace_period: 2m
