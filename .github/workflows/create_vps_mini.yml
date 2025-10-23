@@ -1,0 +1,122 @@
+name: Cung cấp Container Starter Mini
+
+on:  
+  workflow_dispatch:
+    inputs:
+      action_type:
+        description: 'Loại hành động (create_container, create_new_runner, delete_container)'
+        required: true
+        type: choice
+        options:
+          - create_container  # Tạo container mới trên Runner hiện tại
+          - create_new_runner # Dùng khi Bot quyết định VPS cũ đã hết hạn (tạo container đầu tiên trên runner mới)
+          - delete_container  # Xóa container cụ thể
+
+jobs:
+  provisioning:
+    # ⚠️ BẮT BUỘC DÙNG SELF-HOSTED RUNNER CỦA BẠN (VPS Mega Gốc)
+    runs-on: [self-hosted, linux, x64]
+    
+    steps:
+      - name: ⚙️ Kiểm tra loại gói và Chuẩn bị
+        id: prepare
+        run: |
+          ACTION_TYPE="${{ github.event.inputs.action_type }}"
+          RUN_ID="${{ github.run_id }}"
+          CONTAINER_NAME="starter-mini-$RUN_ID"
+          
+          echo "ACTION_TYPE=$ACTION_TYPE" >> $GITHUB_ENV
+          echo "CONTAINER_NAME=$CONTAINER_NAME" >> $GITHUB_ENV
+          
+          # Cài đặt Docker nếu chưa có sẵn trên Self-Hosted Runner
+          sudo apt update -y
+          sudo apt install docker.io -y
+          
+          # Log lại thông tin khởi tạo
+          echo "::notice::Kích hoạt loại hành động: $ACTION_TYPE"
+          
+      # =========================================================
+      # LOGIC TẠO CONTAINER MỚI (Chạy cho cả create_container và create_new_runner)
+      # =========================================================
+      - name: 🐳 Tạo và Chạy Container (Starter Mini)
+        if: env.ACTION_TYPE == 'create_container' || env.ACTION_TYPE == 'create_new_runner'
+        id: container_setup
+        run: |
+          # --- DOCKERFILE CẬP NHẬT (Đã sửa lỗi sudo) ---
+          cat <<EOF > Dockerfile
+          FROM ubuntu:22.04
+
+          # Cài đặt công cụ và sudo
+          RUN apt update && apt install -y \
+              nodejs npm \
+              git \
+              tmate \
+              sudo \
+              procps \
+              openssh-server \
+              && apt clean
+
+          # Tạo thư mục làm việc và User
+          RUN useradd -m -s /bin/bash vpsuser
+
+          # Cấp quyền sudo KHÔNG cần mật khẩu
+          RUN usermod -aG sudo vpsuser
+          RUN echo "vpsuser ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
+
+          RUN echo "vpsuser:password" | chpasswd
+          USER vpsuser
+          WORKDIR /home/vpsuser
+          
+          CMD ["tmate", "-F"]
+          EOF
+          # --- END DOCKERFILE ---
+          
+          # Xây dựng image
+          docker build -t starter-mini-image .
+
+          # Chạy Container với giới hạn 2GB RAM và 1 CPU core
+          docker run -d \
+              --cpus="1" \
+              --memory="2g" \
+              --name ${{ env.CONTAINER_NAME }} \
+              starter-mini-image
+
+          echo "Container ${{ env.CONTAINER_NAME }} đã được khởi chạy. Chờ Tmate..."
+          sleep 15 # Chờ Tmate khởi động
+          
+      - name: 🔑 Lấy và Hiển thị Kết nối SSH (Tmate)
+        if: success() && (env.ACTION_TYPE == 'create_container' || env.ACTION_TYPE == 'create_new_runner')
+        run: |
+          # Lấy chuỗi Tmate SSH từ logs Container
+          SSH_CONNECTION=$(docker logs ${{ env.CONTAINER_NAME }} 2>&1 | grep "ssh .*@.*" | tail -n 1)
+
+          if [ -z "$SSH_CONNECTION" ]; then
+              echo "::error::Không lấy được chuỗi Tmate SSH. Tmate có thể đã thất bại khi khởi động."
+              exit 1
+          fi
+
+          # Gửi kết quả SSH link về log để Bot Discord có thể đọc qua API
+          echo "================================================="
+          echo "SSH_LINK_RESULT:$SSH_CONNECTION" # <-- Dùng tag này để Bot dễ dàng tìm kiếm trong log
+          echo "================================================="
+          
+          echo "::notice::Container đã tạo. Kết nối: $SSH_CONNECTION"
+
+      # =========================================================
+      # LOGIC XÓA CONTAINER (Dùng cho Bot khi hết thời gian)
+      # =========================================================
+      - name: 🗑️ Xóa Container
+        if: env.ACTION_TYPE == 'delete_container'
+        run: |
+          # Bot Discord phải truyền tên Container cần xóa qua Input (Ví dụ: container_name_to_delete)
+          CONTAINER_TO_DELETE="${{ github.event.inputs.container_name_to_delete }}" 
+          
+          if [ -z "$CONTAINER_TO_DELETE" ]; then
+              echo "::error::Không có tên Container để xóa."
+              exit 1
+          fi
+
+          echo "Dừng và xóa Container $CONTAINER_TO_DELETE..."
+          docker stop $CONTAINER_TO_DELETE || true # '|| true' để tránh lỗi nếu Container chưa chạy
+          docker rm $CONTAINER_TO_DELETE
+          echo "::notice::Container $CONTAINER_TO_DELETE đã được xóa."
